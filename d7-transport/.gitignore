@@ -1,0 +1,16 @@
+# секреты
+.env
+*.key
+*.pem
+*.p12
+# архивы для сдачи
+*.bundle
+*.zip
+out/
+# Python и редакторы
+__pycache__/
+*.pyc
+.venv/
+.vscode/
+.idea/
+.DS_Store

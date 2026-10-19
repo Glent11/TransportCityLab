@@ -1,0 +1,46 @@
+# Район 7 — Транспорт. Запуск: docker compose up --build -d
+# Имя проекта по соглашению Р1: dN-код (контейнеры получат имена d7-transport-api-1 и т. п.)
+name: d7-transport
+
+services:
+  api:
+    build: ./services/api
+    environment:
+      DISTRICT: transport
+      SERVICE: api
+      PORT: "8080"
+    # Порт опубликован только на 127.0.0.1 — с других компьютеров сети его не видно.
+    # Снаружи город ходит в район через обратный прокси Шлюза (неделя 3).
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true          # файловая система контейнера только для чтения
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]          # без лишних привилегий ядра
+    security_opt:
+      - no-new-privileges:true
+    networks: [internal]
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: transport
+      POSTGRES_USER: transport
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?задайте DB_PASSWORD в файле .env}
+    # Порт базы НЕ публикуется: к ней ходят только сервисы района по сети internal.
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transport -d transport"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  internal: {}
+
+volumes:
+  db-data: {}
