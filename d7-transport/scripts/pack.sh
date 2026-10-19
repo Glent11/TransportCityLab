@@ -4,7 +4,7 @@
 # Результат: out/dN-код-ДАТА.zip (снимок main) и out/dN-код-ДАТА.bundle (вся история).
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 NAME="$(sed -n 's/^name:[[:space:]]*//p' compose.yaml | head -1)"
 NAME="${NAME:-$(basename "$PWD")}"
 STAMP="$(date +%Y%m%d)"
