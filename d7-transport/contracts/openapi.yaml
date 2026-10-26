@@ -1,4 +1,4 @@
-# Описание HTTP API района (соглашение Р6). Нет описания — нет API.
+# Описание HTTP API района 7 — Транспорт (соглашение P6). Нет описания — нет API.
 # Проверить файл можно в https://editor.swagger.io (вставить текст) или
 # локально: pipx run openapi-spec-validator contracts/openapi.yaml
 openapi: 3.1.0
@@ -9,6 +9,11 @@ info:
     Черновик v0 (неделя 2). Аутентификация появится на неделе 4:
     люди — токен OIDC Паспортного стола (Authorization: Bearer ...),
     сервисы — mTLS с сертификатом городского УЦ.
+
+    API Транспорта принимает события в конверте CloudEvents 1.0 (P5),
+    валидирует их по JSON Schema и маршрутизирует подписчикам.
+    Доставка асинхронная: публикация возвращает 202 Accepted,
+    статус доставки проверяется отдельной операцией.
 servers:
   - url: https://api.transport.city.lab
     description: адрес в городе (после недели 3)
@@ -29,22 +34,95 @@ paths:
                 required: [status]
                 properties:
                   status: {type: string, const: ok}
-  /api/v1/info:
-    get:
-      summary: Пример эндпоинта — замените на настоящие операции района
-      operationId: getInfo
+  /api/v1/events:
+    post:
+      summary: Опубликовать событие в шину
+      description: |
+        Принимает событие в конверте CloudEvents 1.0. Валидирует обязательные
+        поля конверта и `data` по JSON Schema из schema-registry. Проверяет,
+        что источник имеет право публиковать этот `type`. Возвращает `202`
+        с `id` события; доставка выполняется асинхронно.
+      operationId: publishEvent
       parameters:
         - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloudEvent"
       responses:
-        "200":
-          description: Информация о сервисе
+        "202":
+          description: Событие принято и поставлено в очередь на доставку
           content:
             application/json:
               schema:
                 type: object
+                required: [id, status]
                 properties:
-                  district: {type: string, example: transport}
-                  service: {type: string, example: api}
+                  id:
+                    type: string
+                    format: uuid
+                    description: Идентификатор принятого события
+                  status:
+                    type: string
+                    enum: [accepted]
+        "400":
+          $ref: "#/components/responses/Problem"
+        "401":
+          $ref: "#/components/responses/Problem"
+        "403":
+          $ref: "#/components/responses/Problem"
+        "413":
+          $ref: "#/components/responses/Problem"
+        "415":
+          $ref: "#/components/responses/Problem"
+        "422":
+          $ref: "#/components/responses/Problem"
+        default:
+          $ref: "#/components/responses/Problem"
+  /api/v1/events/{id}/status:
+    get:
+      summary: Статус доставки события
+      description: |
+        Возвращает текущий статус доставки события по его `id`: `pending`,
+        `delivered` или `failed`. При `failed` в ответе есть `target` и `reason`.
+      operationId: getEventStatus
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: id
+          in: path
+          required: true
+          description: Идентификатор события из конверта CloudEvents
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Статус доставки
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status]
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending, delivered, failed]
+                  attempts:
+                    type: integer
+                    minimum: 0
+                  target:
+                    type: string
+                    description: Получатель, для которого зафиксирован сбой
+                  reason:
+                    type: string
+                    description: Причина сбоя из закрытого словаря
+        "404":
+          $ref: "#/components/responses/Problem"
         default:
           $ref: "#/components/responses/Problem"
 components:
@@ -55,15 +133,65 @@ components:
       required: false
       description: Сквозной идентификатор запроса; если нет — сервис создаёт новый
       schema: {type: string, maxLength: 64}
+  schemas:
+    CloudEvent:
+      type: object
+      required: [specversion, id, source, type, time, data]
+      properties:
+        specversion:
+          type: string
+          const: "1.0"
+        id:
+          type: string
+          format: uuid
+          description: Уникален для каждого события; по нему отбрасываются повторы
+        source:
+          type: string
+          pattern: "^/d[1-8]-[a-z]+/[a-z0-9-]+$"
+          example: /d4-bank/api
+        type:
+          type: string
+          pattern: "^city\\.[a-z]+\\.[a-z0-9.-]+\\.v[0-9]+$"
+          example: city.bank.fee.paid.v1
+        time:
+          type: string
+          format: date-time
+          description: UTC, RFC 3339 с миллисекундами и Z (P3)
+          example: "2026-10-13T05:07:31.415Z"
+        subject:
+          type: string
+          description: Идентификатор объекта события, не ФИО
+        datacontenttype:
+          type: string
+          const: application/json
+        data:
+          type: object
+          description: Полезная нагрузка; схема — в реестре schema-registry
+    Problem:
+      type: object
+      description: Ошибка в формате RFC 9457 (application/problem+json)
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://transport.city.lab/problems/schema-invalid
+        title:
+          type: string
+          example: Event validation failed
+        status:
+          type: integer
+          example: 422
+        detail:
+          type: string
+          example: data.amount must be integer
+        instance:
+          type: string
+          example: /api/v1/events
   responses:
     Problem:
       description: Ошибка в формате RFC 9457
       content:
         application/problem+json:
           schema:
-            type: object
-            properties:
-              type: {type: string}
-              title: {type: string}
-              status: {type: integer}
-              detail: {type: string}
+            $ref: "#/components/schemas/Problem"
