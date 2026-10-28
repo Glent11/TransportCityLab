@@ -43,6 +43,116 @@
 - `request_id` — из `X-Request-ID` исходного запроса на публикацию, если он был.
 - Событие публикуется не чаще одного раза на пару `(event_id, target)` за интервал, заданный настройкой DLQ; повторы подавляются по `id` (с недели 5).
 
+Пример `city.transport.event.rejected.v1` :
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://city.lab/contracts/schemas/city.transport.event.rejected.v1.schema.json",
+  "title": "city.transport.event.rejected.v1",
+  "description": "Схема для уведомления Транспорта об отклонении входящего события.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0",
+      "description": "Версия CloudEvents."
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+      "description": "Уникальный UUID уведомления об отклонении"
+    },
+    "source": {
+      "const": "/d7-transport/api",
+      "description": "Источник уведомления — API Транспорта."
+    },
+    "type": {
+      "const": "city.transport.event.rejected.v1"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "description": "Время публикации уведомления в UTC, RFC 3339 с миллисекундами и Z."
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ID отклонённого события, если он извлечён и пригоден для использования; соответствует data.event_id."
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "received_at"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+          "description": "UUID отклонённого события, если присутствует и корректен."
+        },
+        "event_type": {
+          "type": "string",
+          "pattern": "^city\\.[a-z0-9-]+\\.[a-z0-9-]+\\.[a-z0-9-]+\\.v[1-9][0-9]*$",
+          "description": "Заявленный тип отклонённого события, если удалось извлечь."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Заявленный источником исходного события source; не является подтверждением подлинности."
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "schema_invalid",
+            "unauthorized",
+            "duplicate",
+            "signature_invalid",
+            "replay"
+          ],
+          "description": "Предлагаемый закрытый словарь причин."
+        },
+        "received_at": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+          "description": "Время получения входящего события Транспортом, UTC, RFC 3339 с миллисекундами и Z."
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Значение X-Request-ID исходного запроса на публикацию."
+        }
+      }
+    }
+  }
+}
+```
+
+Правила публикации:
+- Внешние обязательные поля: `specversion`, `id`, `source`, `type`, `time`, `datacontenttype`, `data`.
+- `data.reason` и `data.received_at` обязательны; `event_id`, `event_type`, `source`, `request_id` необязательны, потому что исходное сообщение может быть некорректным.
+- `subject` необязателен: он может отсутствовать, если корректный ID исходного события не удалось извлечь.
+- `reason` и его закрытый словарь являются предложением до решения архитектурного совета.
+- Схема ограничивает дополнительные поля через `additionalProperties: false`; это строгое правило, которое нужно сверить с общей политикой эволюции контрактов.
+- Проверка `format` зависит от настроек JSON Schema-валидатора; для UUID также указан шаблон, а для времён — шаблон UTC с миллисекундами и `Z`.
+a7e2912 (docs(api): дополнить спецификацию схем событий района 7)
 ## Потребляем
 
 Транспорт принимает **все** события каталога P5, валидирует их по JSON Schema и маршрутизирует подписчикам. `data`-схемы событий других районов Транспорт не пишет — он их получает через `events.md` районов и утверждает на совете.
@@ -74,3 +184,4 @@
 - Зафиксировать, что `data`-схема события принадлежит району-источнику, а конверт, реестр и валидация — Транспорту.
 - Согласовать закрытый словарь `reason` для `delivery.failed` и `event.rejected`; расширение — только через совет.
 - Согласовать, что fan-out событий `city.passport.user.created.v1` и `city.passport.user.disabled.v1` выполняется по реестру подписок, который ведёт Транспорт, а не по жёстко прописанному списку получателей.
+a7e2912 (docs(api): дополнить спецификацию схем событий района 7)
