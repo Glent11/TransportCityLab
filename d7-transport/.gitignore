@@ -14,3 +14,7 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+
+# Локальное состояние шины событий
+state.json
+processed.jsonl
